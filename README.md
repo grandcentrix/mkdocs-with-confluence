@@ -42,7 +42,7 @@ Use following config and adjust it according to your needs:
         password: <YOUR_PASSWORD_TO_CONFLUENCE> # JIRA_PASSWORD env var can be used
         dryrun: true # MKDOCS_TO_CONFLUENCE_DRY_RUN env var can be used
         header_message: <A_MESSAGE_THAT_WILL_BE_ADDED_TO_EVERY_PAGE>
-        upstream_url: <URL_OF_YOUR_MKDOCS_INTANCE>
+        upstream_url: <URL_OF_YOUR_MKDOCS_INSTANCE>
         header_warning: "‼️ This page is created automatically, all you changes will be overwritten during the next MKDocs deployment. Do not edit a page here ‼️"
 
 ```
