@@ -10,6 +10,8 @@ import mimetypes
 import mistune
 import contextlib
 import time
+import logging
+logger = logging.getLogger('mkdocs')
 
 from time import sleep
 from mkdocs.config import config_options
@@ -17,14 +19,12 @@ from mkdocs.plugins import BasePlugin
 from md2cf.confluence_renderer import ConfluenceRenderer
 from os import environ
 from pathlib import Path
-from loguru import logger
 
 ENABLE_ENV_VAR = "MKDOCS_TO_CONFLUENCE"
 DRY_RUN_ENV_VAR = "MKDOCS_TO_CONFLUENCE_DRY_RUN"
 TEMPLATE_BODY = "<p> TEMPLATE </p>"
-HEADER_MESSAGE = "‼️ This page is created automatically, all you changes will be overwritten during the next MKDocs deployment. Do not edit a page here ‼️"
-
-SECTION_PAGE_CONTENT =  "<p> It's juat a Section Page </p>"
+HEADER_WARNING = "‼️ This page is created automatically, all you changes will be overwritten during the next MKDocs deployment. Do not edit a page here ‼️"
+SECTION_PAGE_CONTENT =  "<p> It's just a Section Page </p>"
 
 # -- I don't know why it's here
 @contextlib.contextmanager
@@ -48,7 +48,9 @@ class MkdocsWithConfluence(BasePlugin):
         ("username", config_options.Type(str, default=environ.get("JIRA_USERNAME", None))),
         ("password", config_options.Type(str, default=environ.get("JIRA_PASSWORD", None))),
         ("dryrun", config_options.Type(bool, default=False)),
-        ("header_message", config_options.Type(str, default=HEADER_MESSAGE)),
+        ("header_message", config_options.Type(str, default=None)),
+        ("upstream_url", config_options.Type(str, default=None)),
+        ("header_warning", config_options.Type(str, default=HEADER_WARNING)),
     )
 
     def __init__(self):
@@ -60,9 +62,11 @@ class MkdocsWithConfluence(BasePlugin):
         self.session = requests.Session()
         self.page_attachments = {}
         self.repo_url = None
+        self.header_message = None
+        self.upstream_url = None
+
 
     def on_config(self, config):
-        logger.info(config)
         # ------------------------------------------------------
         # -- Enable the plugin by setting environment variable
         # ------------------------------------------------------
@@ -88,6 +92,19 @@ class MkdocsWithConfluence(BasePlugin):
         if config["repo_url"]:
             self.repo_url = config["repo_url"]
             logger.info(f"git url is set to {self.repo_url}")
+        # ------------------------------------------------------
+        # -- Set a custom header to add to a confluence page
+        # ------------------------------------------------------
+        if self.config["header_message"]:
+            self.header_message = self.config["header_message"]
+            logger.info(f"header message is set to {self.header_message}")
+        # ------------------------------------------------------
+        # -- Set an upstream url to add to a confluence page
+        # ------------------------------------------------------
+        if self.config["upstream_url"]:
+            self.upstream_url = self.config["upstream_url"]
+            logger.info(f"upstream url is set to {self.upstream_url}")
+
 
     def on_files(self, files, config):
         pages = files.documentation_pages()
@@ -99,71 +116,81 @@ class MkdocsWithConfluence(BasePlugin):
 
     def on_page_markdown(self, markdown, page, config, files):
         # TODO: Modify pages here
-        logger.warning("TODO: page should be modified in this block")
-        self.session.auth = (self.config["username"], self.config["password"])
-        confluencePageName = page.url[0:-1]
-        #.replace("/", "-")
-        if self.config["parent_page_name"] is not None:
-            parent_page = self.config["parent_page_name"]
-        else:
-            parent_page = self.config["space"]
-        page_name = ""
-
-        # TODO: Refactor
-        if confluencePageName.rsplit('/',1)[0]:
-            confluencePageName = (f"{confluencePageName.rsplit('/',1)[0]}+{page.title.replace(' ', ' ')}")
-        else:
-            confluencePageName = (f"{page.title.replace(' ', ' ')}")
-            # Create empty pages for sections only
-        logger.info("preparing emtpy pages for sections")
-        for path in page.url.rsplit("/", 2)[0].split("/"):
-            logger.debug(f"path is {path}")
-            parent_id = self.find_page_id(parent_page)
-            if path:
-                if page_name:
-                    page_name = page_name + " " + path
-                else:
-                    page_name = path
-                logger.info(f"Will create a page {page_name} under the {parent_page}")
-                self.add_page(page_name, parent_id, "<p> I want to make sections pages better: https://git.badhouseplants.net/allanger/mkdocs-with-confluence/issues/2 </p>")                    
-                parent_page = page_name
-        parent_id = self.find_page_id(parent_page)
-        confluencePageName = parent_page + " " + page.title
-        new_markdown = markdown
-        if self.repo_url:
-            new_markdown = f">You can edit documentation here: {self.repo_url}\n" + new_markdown
-        new_markdown = f">{self.config['header_message']}\n\n" + new_markdown
-        # -------------------------------------------------
-        # -- Sync attachments
-        # -------------------------------------------------
-        attachments = []
-        # -- TODO: support named picture
-        md_image_reg = "(?:[!]\[(?P<caption>.*?)\])\((?P<image>.*?)\)(?P<options>\{.*\})?"
         try:
-            for match in re.finditer(md_image_reg, markdown):
-                # -- TODO: I'm sure it can be done better
-                attachment_path = "./docs" + match.group(2)
-                logger.info(f"found image: ./docs{match.group(2)}")
-                images = re.search(md_image_reg, new_markdown)
-                # -- TODO: Options maybe the reason why page is invalid, but I'm not sure about it yet
-                # new_markdown = new_markdown.replace(images.group("options"), "")
-                new_markdown = re.sub(md_image_reg, f"<p><ac:image><ri:attachment ri:filename=\"{os.path.basename(attachment_path)}\"/></ac:image></p>", new_markdown)
-                attachments.append(attachment_path)
-        except AttributeError as e:
-            logger.warning(e)
-        logger.debug(f"attachments: {attachments}")
-        confluence_body = self.confluence_mistune(new_markdown)
-        self.add_page(confluencePageName, parent_id, confluence_body)
-        if attachments:
-            logger.debug(f"UPLOADING ATTACHMENTS TO CONFLUENCE FOR {page.title}, DETAILS:")
-            logger.debug(f"FILES: {attachments}")
-        for attachment in attachments:
-            logger.debug(f"trying to upload {attachment} to {confluencePageName}")
-            if self.enabled:
-                try: 
-                    self.add_or_update_attachment(confluencePageName, attachment)
-                except Exception as Argument:
-                    logger.warning(Argument)
+            self.session.auth = (self.config["username"], self.config["password"])
+            confluencePageName = page.url[0:-1]
+            #.replace("/", "-")
+            if self.config["parent_page_name"] is not None:
+                parent_page = self.config["parent_page_name"]
+            else:
+                parent_page = self.config["space"]
+            page_name = ""
+
+            # TODO: Refactor
+            if confluencePageName.rsplit('/',1)[0]:
+                confluencePageName = (f"{confluencePageName.rsplit('/',1)[0]}+{page.title.replace(' ', ' ')}")
+            else:
+                confluencePageName = (f"{page.title.replace(' ', ' ')}")
+                # Create empty pages for sections only
+            logger.info("preparing emtpy pages for sections")
+            for path in page.url.rsplit("/", 2)[0].split("/"):
+                logger.debug(f"path is {path}")
+                parent_id = self.find_page_id(parent_page)
+                if path:
+                    if page_name:
+                        page_name = page_name + " " + path
+                    else:
+                        page_name = path
+                    logger.info(f"Will create a page {page_name} under the {parent_page}")
+                    self.add_page(page_name, parent_id, SECTION_PAGE_CONTENT)                    
+                    parent_page = page_name
+            parent_id = self.find_page_id(parent_page)
+            confluencePageName = parent_page + " " + page.title
+            new_markdown = markdown
+            # -- Adding an upstream url
+            if self.upstream_url:
+                new_markdown = f">Original page is here: {self.upstream_url}/{page.url}\n\n" + new_markdown
+            # -- Adding a header message
+            if self.header_message:
+                new_markdown = f">{self.header_message}\n\n" + new_markdown
+            # -- Adding a repo url
+            if self.repo_url:
+                new_markdown = f">You can edit documentation here: {self.repo_url}\n\n" + new_markdown
+            # -- Adding a header warning                
+            new_markdown = f">{self.config['header_warning']}\n\n" + new_markdown
+            # -------------------------------------------------
+            # -- Sync attachments
+            # -------------------------------------------------
+            attachments = []
+            # -- TODO: support named picture
+            md_image_reg = "(?:[!]\[(?P<caption>.*?)\])\((?P<image>.*?)\)(?P<options>\{.*\})?"
+            try:
+                for match in re.finditer(md_image_reg, markdown):
+                    # -- TODO: I'm sure it can be done better
+                    attachment_path = "./docs" + match.group(2)
+                    logger.info(f"found image: ./docs{match.group(2)}")
+                    images = re.search(md_image_reg, new_markdown)
+                    # -- TODO: Options maybe the reason why page is invalid, but I'm not sure about it yet
+                    # new_markdown = new_markdown.replace(images.group("options"), "")
+                    new_markdown = re.sub(md_image_reg, f"<p><ac:image><ri:attachment ri:filename=\"{os.path.basename(attachment_path)}\"/></ac:image></p>", new_markdown)
+                    attachments.append(attachment_path)
+            except AttributeError as e:
+                logger.warning(e)
+            logger.debug(f"attachments: {attachments}")
+            confluence_body = self.confluence_mistune(new_markdown)
+            self.add_page(confluencePageName, parent_id, confluence_body)
+            if attachments:
+                logger.debug(f"UPLOADING ATTACHMENTS TO CONFLUENCE FOR {page.title}, DETAILS:")
+                logger.debug(f"FILES: {attachments}")
+            for attachment in attachments:
+                logger.debug(f"trying to upload {attachment} to {confluencePageName}")
+                if self.enabled:
+                    try: 
+                        self.add_or_update_attachment(confluencePageName, attachment)
+                    except Exception as Argument:
+                        logger.warning(Argument)
+        except Exception as exp:
+            logger.error(exp)
         return markdown
 
     def on_post_page(self, output, page, config):
