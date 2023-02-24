@@ -1,4 +1,0 @@
-pre-commit
-mime
-mistune
-md2cf

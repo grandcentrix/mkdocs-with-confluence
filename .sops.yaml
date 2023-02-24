@@ -1,0 +1,6 @@
+creation_rules:
+  - path_regex: .*
+    key_groups:
+      - age:
+        - age1yxxn8xscjdue05apn2knfzjy99gwk4x9djfqzgzg83h0hqnwra7qny775y
+

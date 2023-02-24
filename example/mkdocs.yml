@@ -1,0 +1,24 @@
+---
+site_name: My Docs
+repo_url: https://github.com/allanger/mkdocs_with_confluence
+nav:
+  #    - index: 'index.md'
+    - Section1:
+      - page-1: './section1/page1.md'
+      - page-2: './section1/page2.md'
+      - Sub Section:
+          - page-1: './section1/sub_section/page1.md'
+    - Section2:
+      - page-1: './section2/page1.md'
+      - page-2: './section2/page2.md'
+theme:
+  name: material
+plugins:
+  - search
+  - mkdocs-with-confluence:
+      host_url: https://mkdocs-to-conflunce.atlassian.net/wiki/rest/api/content
+      space: MKDOC
+      parent_page_name: MKdocs
+      username: allanguor@gmail.com
+      dryrun: false
+

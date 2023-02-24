@@ -1,7 +1,7 @@
-import time
 import os
 import hashlib
 import sys
+import glob
 import re
 import tempfile
 import shutil
@@ -9,16 +9,24 @@ import requests
 import mimetypes
 import mistune
 import contextlib
+import time
+
 from time import sleep
 from mkdocs.config import config_options
 from mkdocs.plugins import BasePlugin
 from md2cf.confluence_renderer import ConfluenceRenderer
 from os import environ
 from pathlib import Path
+from loguru import logger
 
+ENABLE_ENV_VAR = "MKDOCS_TO_CONFLUENCE"
+DRY_RUN_ENV_VAR = "MKDOCS_TO_CONFLUENCE_DRY_RUN"
 TEMPLATE_BODY = "<p> TEMPLATE </p>"
+HEADER_MESSAGE = "‼️ This page is created automatically, all you changes will be overwritten during the next MKDocs deployment. Do not edit a page here ‼️"
 
+SECTION_PAGE_CONTENT =  "<p> It's juat a Section Page </p>"
 
+# -- I don't know why it's here
 @contextlib.contextmanager
 def nostdout():
     save_stdout = sys.stdout
@@ -26,341 +34,140 @@ def nostdout():
     yield
     sys.stdout = save_stdout
 
-
+# -- I don't know why it's here
 class DummyFile(object):
     def write(self, x):
         pass
 
 
 class MkdocsWithConfluence(BasePlugin):
-    _id = 0
     config_scheme = (
         ("host_url", config_options.Type(str, default=None)),
         ("space", config_options.Type(str, default=None)),
         ("parent_page_name", config_options.Type(str, default=None)),
         ("username", config_options.Type(str, default=environ.get("JIRA_USERNAME", None))),
         ("password", config_options.Type(str, default=environ.get("JIRA_PASSWORD", None))),
-        ("enabled_if_env", config_options.Type(str, default=None)),
-        ("verbose", config_options.Type(bool, default=False)),
-        ("debug", config_options.Type(bool, default=False)),
         ("dryrun", config_options.Type(bool, default=False)),
+        ("header_message", config_options.Type(str, default=HEADER_MESSAGE)),
     )
 
     def __init__(self):
-        self.enabled = True
+        self.enabled = False
         self.confluence_renderer = ConfluenceRenderer(use_xhtml=True)
         self.confluence_mistune = mistune.Markdown(renderer=self.confluence_renderer)
         self.simple_log = False
         self.flen = 1
         self.session = requests.Session()
         self.page_attachments = {}
+        self.repo_url = None
 
-    def on_nav(self, nav, config, files):
-        MkdocsWithConfluence.tab_nav = []
-        navigation_items = nav.__repr__()
-
-        for n in navigation_items.split("\n"):
-            leading_spaces = len(n) - len(n.lstrip(" "))
-            spaces = leading_spaces * " "
-            if "Page" in n:
-                try:
-                    self.page_title = self.__get_page_title(n)
-                    if self.page_title is None:
-                        raise AttributeError
-                except AttributeError:
-                    self.page_local_path = self.__get_page_url(n)
-                    print(
-                        f"WARN    - Page from path {self.page_local_path} has no"
-                        f"          entity in the mkdocs.yml nav section. It will be uploaded"
-                        f"          to the Confluence, but you may not see it on the web server!"
-                    )
-                    self.page_local_name = self.__get_page_name(n)
-                    self.page_title = self.page_local_name
-
-                p = spaces + self.page_title
-                MkdocsWithConfluence.tab_nav.append(p)
-            if "Section" in n:
-                try:
-                    self.section_title = self.__get_section_title(n)
-                    if self.section_title is None:
-                        raise AttributeError
-                except AttributeError:
-                    self.section_local_path = self.__get_page_url(n)
-                    print(
-                        f"WARN    - Section from path {self.section_local_path} has no"
-                        f"          entity in the mkdocs.yml nav section. It will be uploaded"
-                        f"          to the Confluence, but you may not see it on the web server!"
-                    )
-                    self.section_local_name = self.__get_section_title(n)
-                    self.section_title = self.section_local_name
-                s = spaces + self.section_title
-                MkdocsWithConfluence.tab_nav.append(s)
+    def on_config(self, config):
+        logger.info(config)
+        # ------------------------------------------------------
+        # -- Enable the plugin by setting environment variable
+        # ------------------------------------------------------
+        if os.environ.get(ENABLE_ENV_VAR):
+            logger.info("MKDocs with Confluence is enabled")
+            self.enabled = True
+        else:
+            logger.info(
+                f"MKDocs with Confluence is disabled, set the {ENABLE_ENV_VAR} to enable the plugin"
+            )
+        # ------------------------------------------------------
+        # -- Set the dry-run mode
+        # ------------------------------------------------------
+        if self.config["dryrun"]  or os.environ.get(DRY_RUN_ENV_VAR):
+            logger.info("dry-run mode is turned on, your changes won't be synced with Confluence")
+            self.dryrun = True
+        else:
+            logger.info("dry-run mode is turned off, your changes will be synced with Confluence")
+            self.dryrun = False
+        # ------------------------------------------------------
+        # -- Set git url to add to a confluence page
+        # ------------------------------------------------------
+        if config["repo_url"]:
+            self.repo_url = config["repo_url"]
+            logger.info(f"git url is set to {self.repo_url}")
 
     def on_files(self, files, config):
         pages = files.documentation_pages()
         try:
             self.flen = len(pages)
-            print(f"Number of Files in directory tree: {self.flen}")
+            logger.debug(f"number of Files in directory tree: {self.flen}")
         except 0:
-            print("ERR: You have no documentation pages" "in the directory tree, please add at least one!")
-
-    def on_post_template(self, output_content, template_name, config):
-        if self.config["verbose"] is False and self.config["debug"] is False:
-            self.simple_log = True
-            print("INFO    -  Mkdocs With Confluence: Start exporting markdown pages... (simple logging)")
-        else:
-            self.simple_log = False
-
-    def on_config(self, config):
-        if "enabled_if_env" in self.config:
-            env_name = self.config["enabled_if_env"]
-            if env_name:
-                self.enabled = os.environ.get(env_name) == "1"
-                if not self.enabled:
-                    print(
-                        "WARNING - Mkdocs With Confluence: Exporting MKDOCS pages to Confluence turned OFF: "
-                        f"(set environment variable {env_name} to 1 to enable)"
-                    )
-                    return
-                else:
-                    print(
-                        "INFO    -  Mkdocs With Confluence: Exporting MKDOCS pages to Confluence "
-                        f"turned ON by var {env_name}==1!"
-                    )
-                    self.enabled = True
-            else:
-                print(
-                    "WARNING -  Mkdocs With Confluence: Exporting MKDOCS pages to Confluence turned OFF: "
-                    f"(set environment variable {env_name} to 1 to enable)"
-                )
-                return
-        else:
-            print("INFO    -  Mkdocs With Confluence: Exporting MKDOCS pages to Confluence turned ON by default!")
-            self.enabled = True
-
-        if self.config["dryrun"]:
-            print("WARNING -  Mkdocs With Confluence - DRYRUN MODE turned ON")
-            self.dryrun = True
-        else:
-            self.dryrun = False
+            logger.error("no files found to be synced")
 
     def on_page_markdown(self, markdown, page, config, files):
-        MkdocsWithConfluence._id += 1
+        # TODO: Modify pages here
+        logger.warning("TODO: page should be modified in this block")
         self.session.auth = (self.config["username"], self.config["password"])
+        confluencePageName = page.url[0:-1]
+        #.replace("/", "-")
+        if self.config["parent_page_name"] is not None:
+            parent_page = self.config["parent_page_name"]
+        else:
+            parent_page = self.config["space"]
+        page_name = ""
 
-        if self.enabled:
-            if self.simple_log is True:
-                print("INFO    - Mkdocs With Confluence: Page export progress: [", end="", flush=True)
-                for i in range(MkdocsWithConfluence._id):
-                    print("#", end="", flush=True)
-                for j in range(self.flen - MkdocsWithConfluence._id):
-                    print("-", end="", flush=True)
-                print(f"] ({MkdocsWithConfluence._id} / {self.flen})", end="\r", flush=True)
-
-            if self.config["debug"]:
-                print(f"\nDEBUG    - Handling Page '{page.title}' (And Parent Nav Pages if necessary):\n")
-            if not all(self.config_scheme):
-                print("DEBUG    - ERR: YOU HAVE EMPTY VALUES IN YOUR CONFIG. ABORTING")
-                return markdown
-
-            try:
-                if self.config["debug"]:
-                    print("DEBUG    - Get section first parent title...: ")
-                try:
-
-                    parent = self.__get_section_title(page.ancestors[0].__repr__())
-                except IndexError as e:
-                    if self.config["debug"]:
-                        print(
-                            f"DEBUG    - WRN({e}): No first parent! Assuming "
-                            f"DEBUG    - {self.config['parent_page_name']}..."
-                        )
-                    parent = None
-                if self.config["debug"]:
-                    print(f"DEBUG    - {parent}")
-                if not parent:
-                    parent = self.config["parent_page_name"]
-
-                if self.config["parent_page_name"] is not None:
-                    main_parent = self.config["parent_page_name"]
+        # TODO: Refactor
+        if confluencePageName.rsplit('/',1)[0]:
+            confluencePageName = (f"{confluencePageName.rsplit('/',1)[0]}+{page.title.replace(' ', ' ')}")
+        else:
+            confluencePageName = (f"{page.title.replace(' ', ' ')}")
+            # Create empty pages for sections only
+        logger.info("preparing emtpy pages for sections")
+        for path in page.url.rsplit("/", 2)[0].split("/"):
+            logger.debug(f"path is {path}")
+            parent_id = self.find_page_id(parent_page)
+            if path:
+                if page_name:
+                    page_name = page_name + " " + path
                 else:
-                    main_parent = self.config["space"]
-
-                if self.config["debug"]:
-                    print("DEBUG    - Get section second parent title...: ")
-                try:
-                    parent1 = self.__get_section_title(page.ancestors[1].__repr__())
-                except IndexError as e:
-                    if self.config["debug"]:
-                        print(
-                            f"DEBUG    - ERR({e}) No second parent! Assuming "
-                            f"second parent is main parent: {main_parent}..."
-                        )
-                    parent1 = None
-                if self.config["debug"]:
-                    print(f"{parent}")
-
-                if not parent1:
-                    parent1 = main_parent
-                    if self.config["debug"]:
-                        print(
-                            f"DEBUG    - ONLY ONE PARENT FOUND. ASSUMING AS A "
-                            f"FIRST NODE after main parent config {main_parent}"
-                        )
-
-                if self.config["debug"]:
-                    print(f"DEBUG    - PARENT0: {parent}, PARENT1: {parent1}, MAIN PARENT: {main_parent}")
-
-                tf = tempfile.NamedTemporaryFile(delete=False)
-                f = open(tf.name, "w")
-
-                attachments = []
-                try:
-                    for match in re.finditer(r'img src="file://(.*)" s', markdown):
-                        if self.config["debug"]:
-                            print(f"DEBUG    - FOUND IMAGE: {match.group(1)}")
-                        attachments.append(match.group(1))
-                    for match in re.finditer(r"!\[[\w\. -]*\]\((?!http|file)([^\s,]*).*\)", markdown):
-                        file_path = match.group(1).lstrip("./\\")
-                        attachments.append(file_path)
-
-                        if self.config["debug"]:
-                            print(f"DEBUG    - FOUND IMAGE: {file_path}")
-                        attachments.append("docs/" + file_path.replace("../", ""))
-
-                except AttributeError as e:
-                    if self.config["debug"]:
-                        print(f"DEBUG    - WARN(({e}): No images found in markdown. Proceed..")
-                new_markdown = re.sub(
-                    r'<img src="file:///tmp/', '<p><ac:image ac:height="350"><ri:attachment ri:filename="', markdown
-                )
-                new_markdown = re.sub(r'" style="page-break-inside: avoid;">', '"/></ac:image></p>', new_markdown)
-                confluence_body = self.confluence_mistune(new_markdown)
-                f.write(confluence_body)
-                if self.config["debug"]:
-                    print(confluence_body)
-                page_name = page.title
-                new_name = "confluence_page_" + page_name.replace(" ", "_") + ".html"
-                shutil.copy(f.name, new_name)
-                f.close()
-
-                if self.config["debug"]:
-                    print(
-                        f"\nDEBUG    - UPDATING PAGE TO CONFLUENCE, DETAILS:\n"
-                        f"DEBUG    - HOST: {self.config['host_url']}\n"
-                        f"DEBUG    - SPACE: {self.config['space']}\n"
-                        f"DEBUG    - TITLE: {page.title}\n"
-                        f"DEBUG    - PARENT: {parent}\n"
-                        f"DEBUG    - BODY: {confluence_body}\n"
-                    )
-
-                page_id = self.find_page_id(page.title)
-                if page_id is not None:
-                    if self.config["debug"]:
-                        print(
-                            f"DEBUG    - JUST ONE STEP FROM UPDATE OF PAGE '{page.title}' \n"
-                            f"DEBUG    - CHECKING IF PARENT PAGE ON CONFLUENCE IS THE SAME AS HERE"
-                        )
-
-                    parent_name = self.find_parent_name_of_page(page.title)
-
-                    if parent_name == parent:
-                        if self.config["debug"]:
-                            print("DEBUG    - Parents match. Continue...")
-                    else:
-                        if self.config["debug"]:
-                            print(f"DEBUG    - ERR, Parents does not match: '{parent}' =/= '{parent_name}' Aborting...")
-                        return markdown
-                    self.update_page(page.title, confluence_body)
-                    for i in MkdocsWithConfluence.tab_nav:
-                        if page.title in i:
-                            print(f"INFO    - Mkdocs With Confluence: {i} *UPDATE*")
-                else:
-                    if self.config["debug"]:
-                        print(
-                            f"DEBUG    - PAGE: {page.title}, PARENT0: {parent}, "
-                            f"PARENT1: {parent1}, MAIN PARENT: {main_parent}"
-                        )
-                    parent_id = self.find_page_id(parent)
-                    self.wait_until(parent_id, 1, 20)
-                    second_parent_id = self.find_page_id(parent1)
-                    self.wait_until(second_parent_id, 1, 20)
-                    main_parent_id = self.find_page_id(main_parent)
-                    if not parent_id:
-                        if not second_parent_id:
-                            main_parent_id = self.find_page_id(main_parent)
-                            if not main_parent_id:
-                                print("ERR: MAIN PARENT UNKNOWN. ABORTING!")
-                                return markdown
-
-                            if self.config["debug"]:
-                                print(
-                                    f"DEBUG    - Trying to ADD page '{parent1}' to "
-                                    f"main parent({main_parent}) ID: {main_parent_id}"
-                                )
-                            body = TEMPLATE_BODY.replace("TEMPLATE", parent1)
-                            self.add_page(parent1, main_parent_id, body)
-                            for i in MkdocsWithConfluence.tab_nav:
-                                if parent1 in i:
-                                    print(f"INFO    - Mkdocs With Confluence: {i} *NEW PAGE*")
-                            time.sleep(1)
-
-                        if self.config["debug"]:
-                            print(
-                                f"DEBUG    - Trying to ADD page '{parent}' "
-                                f"to parent1({parent1}) ID: {second_parent_id}"
-                            )
-                        body = TEMPLATE_BODY.replace("TEMPLATE", parent)
-                        self.add_page(parent, second_parent_id, body)
-                        for i in MkdocsWithConfluence.tab_nav:
-                            if parent in i:
-                                print(f"INFO    - Mkdocs With Confluence: {i} *NEW PAGE*")
-                        time.sleep(1)
-
-                    if parent_id is None:
-                        for i in range(11):
-                            while parent_id is None:
-                                try:
-                                    self.add_page(page.title, parent_id, confluence_body)
-                                except requests.exceptions.HTTPError:
-                                    print(
-                                        f"ERR    - HTTP error on adding page. It probably occured due to "
-                                        f"parent ID('{parent_id}') page is not YET synced on server. Retry nb {i}/10..."
-                                    )
-                                    sleep(5)
-                                    parent_id = self.find_page_id(parent)
-                                break
-
-                    self.add_page(page.title, parent_id, confluence_body)
-
-                    print(f"Trying to ADD page '{page.title}' to parent0({parent}) ID: {parent_id}")
-                    for i in MkdocsWithConfluence.tab_nav:
-                        if page.title in i:
-                            print(f"INFO    - Mkdocs With Confluence: {i} *NEW PAGE*")
-
-                if attachments:
-                    self.page_attachments[page.title] = attachments
-
-            except IndexError as e:
-                if self.config["debug"]:
-                    print(f"DEBUG    - ERR({e}): Exception error!")
-                return markdown
-
+                    page_name = path
+                logger.info(f"Will create a page {page_name} under the {parent_page}")
+                self.add_page(page_name, parent_id, "<p> I want to make sections pages better: https://git.badhouseplants.net/allanger/mkdocs-with-confluence/issues/2 </p>")                    
+                parent_page = page_name
+        parent_id = self.find_page_id(parent_page)
+        confluencePageName = parent_page + " " + page.title
+        new_markdown = markdown
+        if self.repo_url:
+            new_markdown = f">You can edit documentation here: {self.repo_url}\n" + new_markdown
+        new_markdown = f">{self.config['header_message']}\n\n" + new_markdown
+        # -------------------------------------------------
+        # -- Sync attachments
+        # -------------------------------------------------
+        attachments = []
+        # -- TODO: support named picture
+        md_image_reg = "(?:[!]\[(?P<caption>.*?)\])\((?P<image>.*?)\)(?P<options>\{.*\})?"
+        try:
+            for match in re.finditer(md_image_reg, markdown):
+                # -- TODO: I'm sure it can be done better
+                attachment_path = "./docs" + match.group(2)
+                logger.info(f"found image: ./docs{match.group(2)}")
+                images = re.search(md_image_reg, new_markdown)
+                # -- TODO: Options maybe the reason why page is invalid, but I'm not sure about it yet
+                # new_markdown = new_markdown.replace(images.group("options"), "")
+                new_markdown = re.sub(md_image_reg, f"<p><ac:image><ri:attachment ri:filename=\"{os.path.basename(attachment_path)}\"/></ac:image></p>", new_markdown)
+                attachments.append(attachment_path)
+        except AttributeError as e:
+            logger.warning(e)
+        logger.debug(f"attachments: {attachments}")
+        confluence_body = self.confluence_mistune(new_markdown)
+        self.add_page(confluencePageName, parent_id, confluence_body)
+        if attachments:
+            logger.debug(f"UPLOADING ATTACHMENTS TO CONFLUENCE FOR {page.title}, DETAILS:")
+            logger.debug(f"FILES: {attachments}")
+        for attachment in attachments:
+            logger.debug(f"trying to upload {attachment} to {confluencePageName}")
+            if self.enabled:
+                try: 
+                    self.add_or_update_attachment(confluencePageName, attachment)
+                except Exception as Argument:
+                    logger.warning(Argument)
         return markdown
 
     def on_post_page(self, output, page, config):
-        site_dir = config.get("site_dir")
-        attachments = self.page_attachments.get(page.title, [])
-
-        if self.config["debug"]:
-            print(f"\nDEBUG    - UPLOADING ATTACHMENTS TO CONFLUENCE FOR {page.title}, DETAILS:")
-            print(f"FILES: {attachments}  \n")
-        for attachment in attachments:
-            if self.config["debug"]:
-                print(f"DEBUG    - looking for {attachment} in {site_dir}")
-            for p in Path(site_dir).rglob(f"*{attachment}"):
-                self.add_or_update_attachment(page.title, p)
-        return output
+        logger.info("The author was uploading images here, maybe there was a reason for that")
 
     def on_page_content(self, html, page, config, files):
         return html
@@ -372,19 +179,17 @@ class MkdocsWithConfluence(BasePlugin):
         return os.path.basename(re.search("url='(.*)'\\)", section).group(1)[:-1])
 
     def __get_section_name(self, section):
-        if self.config["debug"]:
-            print(f"DEBUG    - SECTION name: {section}")
+        logger.debug(f"SECTION name: {section}")
         return os.path.basename(re.search("url='(.*)'\\/", section).group(1)[:-1])
 
     def __get_section_title(self, section):
-        if self.config["debug"]:
-            print(f"DEBUG    - SECTION title: {section}")
+        logger.debug(f"SECTION title: {section}")
         try:
             r = re.search("Section\\(title='(.*)'\\)", section)
             return r.group(1)
         except AttributeError:
             name = self.__get_section_name(section)
-            print(f"WRN    - Section '{name}' doesn't exist in the mkdocs.yml nav section!")
+            logger.warning(f"Section '{name}' doesn't exist in the mkdocs.yml nav section!")
             return name
 
     def __get_page_title(self, section):
@@ -393,7 +198,7 @@ class MkdocsWithConfluence(BasePlugin):
             return r.group(1)
         except AttributeError:
             name = self.__get_page_url(section)
-            print(f"WRN    - Page '{name}' doesn't exist in the mkdocs.yml nav section!")
+            logger.warning(f"Page '{name}' doesn't exist in the mkdocs.yml nav section!")
             return name
 
     # Adapted from https://stackoverflow.com/a/3431838
@@ -405,9 +210,8 @@ class MkdocsWithConfluence(BasePlugin):
         return hash_sha1.hexdigest()
 
     def add_or_update_attachment(self, page_name, filepath):
-        print(f"INFO    - Mkdocs With Confluence * {page_name} *ADD/Update ATTACHMENT if required* {filepath}")
-        if self.config["debug"]:
-            print(f" * Mkdocs With Confluence: Add Attachment: PAGE NAME: {page_name}, FILE: {filepath}")
+        logger.warning(f"Mkdocs With Confluence * {page_name} *ADD/Update ATTACHMENT if required* {filepath}")
+        logger.debug(f"Mkdocs With Confluence: Add Attachment: PAGE NAME: {page_name}, FILE: {filepath}")
         page_id = self.find_page_id(page_name)
         if page_id:
             file_hash = self.get_file_sha1(filepath)
@@ -417,25 +221,21 @@ class MkdocsWithConfluence(BasePlugin):
                 file_hash_regex = re.compile(r"\[v([a-f0-9]{40})]$")
                 existing_match = file_hash_regex.search(existing_attachment["version"]["message"])
                 if existing_match is not None and existing_match.group(1) == file_hash:
-                    if self.config["debug"]:
-                        print(f" * Mkdocs With Confluence * {page_name} * Existing attachment skipping * {filepath}")
+                    logger.debug(f" * Mkdocs With Confluence * {page_name} * Existing attachment skipping * {filepath}")
                 else:
                     self.update_attachment(page_id, filepath, existing_attachment, attachment_message)
             else:
                 self.create_attachment(page_id, filepath, attachment_message)
         else:
-            if self.config["debug"]:
-                print("PAGE DOES NOT EXISTS")
+            logger.debug("PAGE DOES NOT EXISTS")
 
     def get_attachment(self, page_id, filepath):
         name = os.path.basename(filepath)
-        if self.config["debug"]:
-            print(f" * Mkdocs With Confluence: Get Attachment: PAGE ID: {page_id}, FILE: {filepath}")
+        logger.debug(f" * Mkdocs With Confluence: Get Attachment: PAGE ID: {page_id}, FILE: {filepath}")
 
         url = self.config["host_url"] + "/" + page_id + "/child/attachment"
         headers = {"X-Atlassian-Token": "no-check"}  # no content-type here!
-        if self.config["debug"]:
-            print(f"URL: {url}")
+        logger.debug(f"URL: {url}")
 
         r = self.session.get(url, headers=headers, params={"filename": name, "expand": "version"})
         r.raise_for_status()
@@ -445,15 +245,11 @@ class MkdocsWithConfluence(BasePlugin):
             return response_json["results"][0]
 
     def update_attachment(self, page_id, filepath, existing_attachment, message):
-        if self.config["debug"]:
-            print(f" * Mkdocs With Confluence: Update Attachment: PAGE ID: {page_id}, FILE: {filepath}")
+        logger.debug(f" * Mkdocs With Confluence: Update Attachment: PAGE ID: {page_id}, FILE: {filepath}")
 
         url = self.config["host_url"] + "/" + page_id + "/child/attachment/" + existing_attachment["id"] + "/data"
         headers = {"X-Atlassian-Token": "no-check"}  # no content-type here!
-
-        if self.config["debug"]:
-            print(f"URL: {url}")
-
+        logger.debug(f"URL: {url}")
         filename = os.path.basename(filepath)
 
         # determine content-type
@@ -465,21 +261,18 @@ class MkdocsWithConfluence(BasePlugin):
         if not self.dryrun:
             r = self.session.post(url, headers=headers, files=files)
             r.raise_for_status()
-            print(r.json())
+            logger.debug(r.json())
             if r.status_code == 200:
-                print("OK!")
+                logger.info("OK!")
             else:
                 print("ERR!")
 
     def create_attachment(self, page_id, filepath, message):
-        if self.config["debug"]:
-            print(f" * Mkdocs With Confluence: Create Attachment: PAGE ID: {page_id}, FILE: {filepath}")
+        logger.debug(f" * Mkdocs With Confluence: Create Attachment: PAGE ID: {page_id}, FILE: {filepath}")
 
         url = self.config["host_url"] + "/" + page_id + "/child/attachment"
         headers = {"X-Atlassian-Token": "no-check"}  # no content-type here!
-
-        if self.config["debug"]:
-            print(f"URL: {url}")
+        logger.debug(f"URL: {url}")
 
         filename = os.path.basename(filepath)
 
@@ -490,73 +283,67 @@ class MkdocsWithConfluence(BasePlugin):
         files = {"file": (filename, open(filepath, "rb"), content_type), "comment": message}
         if not self.dryrun:
             r = self.session.post(url, headers=headers, files=files)
-            print(r.json())
+            logger.debug(r.json())
             r.raise_for_status()
             if r.status_code == 200:
-                print("OK!")
+                logger.debug("OK!")
             else:
-                print("ERR!")
+                logger.debug("ERR!")
 
     def find_page_id(self, page_name):
-        if self.config["debug"]:
-            print(f"INFO    -   * Mkdocs With Confluence: Find Page ID: PAGE NAME: {page_name}")
+        logger.info(f"looking for a page id of the page: {page_name}")
         name_confl = page_name.replace(" ", "+")
         url = self.config["host_url"] + "?title=" + name_confl + "&spaceKey=" + self.config["space"] + "&expand=history"
-        if self.config["debug"]:
-            print(f"URL: {url}")
+        logger.debug(f"URL: {url}")
+
         r = self.session.get(url)
         r.raise_for_status()
         with nostdout():
             response_json = r.json()
         if response_json["results"]:
-            if self.config["debug"]:
-                print(f"ID: {response_json['results'][0]['id']}")
+            logger.debug(f"response: {response_json}")
             return response_json["results"][0]["id"]
         else:
-            if self.config["debug"]:
-                print("PAGE DOES NOT EXIST")
+            logger.debug(f"page {page_name} doens't exist")
             return None
 
     def add_page(self, page_name, parent_page_id, page_content_in_storage_format):
-        print(f"INFO    -   * Mkdocs With Confluence: {page_name} - *NEW PAGE*")
-
-        if self.config["debug"]:
-            print(f" * Mkdocs With Confluence: Adding Page: PAGE NAME: {page_name}, parent ID: {parent_page_id}")
-        url = self.config["host_url"] + "/"
-        if self.config["debug"]:
-            print(f"URL: {url}")
-        headers = {"Content-Type": "application/json"}
-        space = self.config["space"]
-        data = {
-            "type": "page",
-            "title": page_name,
-            "space": {"key": space},
-            "ancestors": [{"id": parent_page_id}],
-            "body": {"storage": {"value": page_content_in_storage_format, "representation": "storage"}},
-        }
-        if self.config["debug"]:
-            print(f"DATA: {data}")
-        if not self.dryrun:
-            r = self.session.post(url, json=data, headers=headers)
-            r.raise_for_status()
-            if r.status_code == 200:
-                if self.config["debug"]:
-                    print("OK!")
+        logger.info(f"Creating a new page: {page_name} under page with ID: {parent_page_id}")
+        if self.enabled:
+            if self.find_page_id(page_name):
+                self.update_page(page_name, page_content_in_storage_format)
             else:
-                if self.config["debug"]:
-                    print("ERR!")
+                logger.info(f"Creating a new page: {page_name} under page with ID: {parent_page_id}")
+                url = self.config["host_url"] + "/"
+                logger.debug(f"URL: {url}")
+                headers = {"Content-Type": "application/json"}
+                space = self.config["space"]
+                data = {
+                    "type": "page",
+                    "title": page_name,
+                    "space": {"key": space},
+                    "ancestors": [{"id": parent_page_id}],
+                    "body": {"storage": {"value": page_content_in_storage_format, "representation": "storage"}},
+                }
+                logger.debug(f"DATA: {data}")
+                if not self.dryrun:
+                    try:
+                        r = self.session.post(url, json=data, headers=headers)
+                        r.raise_for_status()
+                    except Exception as exp:
+                        logger.error(exp)
+                    if r.status_code == 200:
+                        logger.info(f"page created: {page_name}")
+                    else:
+                        logger.error(f"page can't be created: {page_name}")
 
     def update_page(self, page_name, page_content_in_storage_format):
         page_id = self.find_page_id(page_name)
-        print(f"INFO    -   * Mkdocs With Confluence: {page_name} - *UPDATE*")
-        if self.config["debug"]:
-            print(f" * Mkdocs With Confluence: Update PAGE ID: {page_id}, PAGE NAME: {page_name}")
+        logger.debug(f"updating page {page_name}")
         if page_id:
             page_version = self.find_page_version(page_name)
             page_version = page_version + 1
             url = self.config["host_url"] + "/" + page_id
-            if self.config["debug"]:
-                print(f"URL: {url}")
             headers = {"Content-Type": "application/json"}
             space = self.config["space"]
             data = {
@@ -569,21 +356,20 @@ class MkdocsWithConfluence(BasePlugin):
             }
 
             if not self.dryrun:
-                r = self.session.put(url, json=data, headers=headers)
-                r.raise_for_status()
+                try:
+                    r = self.session.put(url, json=data, headers=headers)
+                    r.raise_for_status()
+                except Exception as exp:
+                    logger.error(exp)
                 if r.status_code == 200:
-                    if self.config["debug"]:
-                        print("OK!")
+                    logger.info(f"page created: {page_name}")
                 else:
-                    if self.config["debug"]:
-                        print("ERR!")
+                    logger.error(f"page can't be created: {page_name}")
         else:
-            if self.config["debug"]:
-                print("PAGE DOES NOT EXIST YET!")
+            logger.warning("page {page_name} doesn't exist")
 
     def find_page_version(self, page_name):
-        if self.config["debug"]:
-            print(f"INFO    -   * Mkdocs With Confluence: Find PAGE VERSION, PAGE NAME: {page_name}")
+        logger.debug(f"INFO    -   * Mkdocs With Confluence: Find PAGE VERSION, PAGE NAME: {page_name}")
         name_confl = page_name.replace(" ", "+")
         url = self.config["host_url"] + "?title=" + name_confl + "&spaceKey=" + self.config["space"] + "&expand=version"
         r = self.session.get(url)
@@ -591,17 +377,14 @@ class MkdocsWithConfluence(BasePlugin):
         with nostdout():
             response_json = r.json()
         if response_json["results"] is not None:
-            if self.config["debug"]:
-                print(f"VERSION: {response_json['results'][0]['version']['number']}")
+            logger.debug(f"VERSION: {response_json['results'][0]['version']['number']}")
             return response_json["results"][0]["version"]["number"]
         else:
-            if self.config["debug"]:
-                print("PAGE DOES NOT EXISTS")
+            logger.debug("PAGE DOES NOT EXISTS")
             return None
 
     def find_parent_name_of_page(self, name):
-        if self.config["debug"]:
-            print(f"INFO    -   * Mkdocs With Confluence: Find PARENT OF PAGE, PAGE NAME: {name}")
+        logger.debug(f"INFO    -   * Mkdocs With Confluence: Find PARENT OF PAGE, PAGE NAME: {name}")
         idp = self.find_page_id(name)
         url = self.config["host_url"] + "/" + idp + "?expand=ancestors"
 
@@ -610,15 +393,14 @@ class MkdocsWithConfluence(BasePlugin):
         with nostdout():
             response_json = r.json()
         if response_json:
-            if self.config["debug"]:
-                print(f"PARENT NAME: {response_json['ancestors'][-1]['title']}")
+            logger.debug(f"PARENT NAME: {response_json['ancestors'][-1]['title']}")
             return response_json["ancestors"][-1]["title"]
         else:
-            if self.config["debug"]:
-                print("PAGE DOES NOT HAVE PARENT")
+            logger.debug("PAGE DOES NOT HAVE PARENT")
             return None
 
     def wait_until(self, condition, interval=0.1, timeout=1):
         start = time.time()
         while not condition and time.time() - start < timeout:
             time.sleep(interval)
+
