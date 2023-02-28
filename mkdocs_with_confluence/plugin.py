@@ -52,6 +52,7 @@ class MkdocsWithConfluence(BasePlugin):
         ("header_message", config_options.Type(str, default=None)),
         ("upstream_url", config_options.Type(str, default=None)),
         ("header_warning", config_options.Type(str, default=HEADER_WARNING)),
+        ("set_homepage", config_options.Type(bool, default=False)),
     )
 
     def __init__(self):
@@ -120,7 +121,7 @@ class MkdocsWithConfluence(BasePlugin):
         if self.enabled:
             try:
                 self.session.auth = (self.config["username"], self.config["password"])
-                confluencePageName = page.url[0:-1]
+                confluence_page_name = page.url[0:-1]
                 #.replace("/", "-")
                 if self.config["parent_page_name"] is not None:
                     parent_page = self.config["parent_page_name"]
@@ -129,10 +130,10 @@ class MkdocsWithConfluence(BasePlugin):
                 page_name = ""
     
                 # TODO: Refactor
-                if confluencePageName.rsplit('/',1)[0]:
-                    confluencePageName = (f"{confluencePageName.rsplit('/',1)[0]}+{page.title.replace(' ', ' ')}")
+                if confluence_page_name.rsplit('/',1)[0]:
+                    confluence_page_name = (f"{confluence_page_name.rsplit('/',1)[0]}+{page.title.replace(' ', ' ')}")
                 else:
-                    confluencePageName = (f"{page.title.replace(' ', ' ')}")
+                    confluence_page_name = (f"{page.title.replace(' ', ' ')}")
                     # Create empty pages for sections only
                 logger.info("preparing emtpy pages for sections")
                 for path in page.url.rsplit("/", 2)[0].split("/"):
@@ -147,7 +148,7 @@ class MkdocsWithConfluence(BasePlugin):
                         self.add_page(page_name, parent_id, SECTION_PAGE_CONTENT)                    
                         parent_page = page_name
                 parent_id = self.find_page_id(parent_page)
-                confluencePageName = parent_page + " " + page.title
+                confluence_page_name = parent_page + " " + page.title
                 new_markdown = markdown
                 # -- Adding an upstream url
                 if self.upstream_url:
@@ -180,15 +181,19 @@ class MkdocsWithConfluence(BasePlugin):
                     logger.warning(e)
                 logger.debug(f"attachments: {attachments}")
                 confluence_body = self.confluence_mistune(new_markdown)
-                self.add_page(confluencePageName, parent_id, confluence_body)
+                self.add_page(confluence_page_name, parent_id, confluence_body)
+                logger.info(f"page url = {page.url}")
+                if not page.url and self.config["set_homepage"]:
+                    self.set_homepage(confluence_page_name)
+
                 if attachments:
                     logger.debug(f"UPLOADING ATTACHMENTS TO CONFLUENCE FOR {page.title}, DETAILS:")
                     logger.debug(f"FILES: {attachments}")
                 for attachment in attachments:
-                    logger.debug(f"trying to upload {attachment} to {confluencePageName}")
+                    logger.debug(f"trying to upload {attachment} to {confluence_page_name}")
                     if self.enabled:
                         try: 
-                            self.add_or_update_attachment(confluencePageName, attachment)
+                            self.add_or_update_attachment(confluence_page_name, attachment)
                         except Exception as Argument:
                             logger.warning(Argument)
             except Exception as exp:
@@ -263,7 +268,7 @@ class MkdocsWithConfluence(BasePlugin):
         name = os.path.basename(filepath)
         logger.debug(f" * Mkdocs With Confluence: Get Attachment: PAGE ID: {page_id}, FILE: {filepath}")
 
-        url = self.config["host_url"] + "/" + page_id + "/child/attachment"
+        url = self.config["host_url"] + "/content/" + page_id + "/child/attachment"
         headers = {"X-Atlassian-Token": "no-check"}  # no content-type here!
         logger.debug(f"URL: {url}")
 
@@ -277,7 +282,7 @@ class MkdocsWithConfluence(BasePlugin):
     def update_attachment(self, page_id, filepath, existing_attachment, message):
         logger.debug(f" * Mkdocs With Confluence: Update Attachment: PAGE ID: {page_id}, FILE: {filepath}")
 
-        url = self.config["host_url"] + "/" + page_id + "/child/attachment/" + existing_attachment["id"] + "/data"
+        url = self.config["host_url"] + "/content/" + page_id + "/child/attachment/" + existing_attachment["id"] + "/data"
         headers = {"X-Atlassian-Token": "no-check"}  # no content-type here!
         logger.debug(f"URL: {url}")
         filename = os.path.basename(filepath)
@@ -300,7 +305,7 @@ class MkdocsWithConfluence(BasePlugin):
     def create_attachment(self, page_id, filepath, message):
         logger.debug(f" * Mkdocs With Confluence: Create Attachment: PAGE ID: {page_id}, FILE: {filepath}")
 
-        url = self.config["host_url"] + "/" + page_id + "/child/attachment"
+        url = self.config["host_url"] + "/content/" + page_id + "/child/attachment"
         headers = {"X-Atlassian-Token": "no-check"}  # no content-type here!
         logger.debug(f"URL: {url}")
 
@@ -323,7 +328,7 @@ class MkdocsWithConfluence(BasePlugin):
     def find_page_id(self, page_name):
         logger.info(f"looking for a page id of the page: {page_name}")
         name_confl = page_name.replace(" ", "+")
-        url = self.config["host_url"] + "?title=" + name_confl + "&spaceKey=" + self.config["space"] + "&expand=history"
+        url = self.config["host_url"] + "/content?title=" + name_confl + "&spaceKey=" + self.config["space"] + "&expand=history"
         logger.debug(f"URL: {url}")
 
         r = self.session.get(url)
@@ -334,7 +339,7 @@ class MkdocsWithConfluence(BasePlugin):
             logger.debug(f"response: {response_json}")
             return response_json["results"][0]["id"]
         else:
-            logger.debug(f"page {page_name} doens't exist")
+            logger.warning(f"page {page_name} doens't exist")
             return None
 
     def add_page(self, page_name, parent_page_id, page_content_in_storage_format):
@@ -344,7 +349,7 @@ class MkdocsWithConfluence(BasePlugin):
                 self.update_page(page_name, page_content_in_storage_format)
             else:
                 logger.info(f"Creating a new page: {page_name} under page with ID: {parent_page_id}")
-                url = self.config["host_url"] + "/"
+                url = self.config["host_url"] + "/content/"
                 logger.debug(f"URL: {url}")
                 headers = {"Content-Type": "application/json"}
                 space = self.config["space"]
@@ -373,7 +378,7 @@ class MkdocsWithConfluence(BasePlugin):
         if page_id:
             page_version = self.find_page_version(page_name)
             page_version = page_version + 1
-            url = self.config["host_url"] + "/" + page_id
+            url = self.config["host_url"] + "/content/" + page_id
             headers = {"Content-Type": "application/json"}
             space = self.config["space"]
             data = {
@@ -401,7 +406,7 @@ class MkdocsWithConfluence(BasePlugin):
     def find_page_version(self, page_name):
         logger.debug(f"INFO    -   * Mkdocs With Confluence: Find PAGE VERSION, PAGE NAME: {page_name}")
         name_confl = page_name.replace(" ", "+")
-        url = self.config["host_url"] + "?title=" + name_confl + "&spaceKey=" + self.config["space"] + "&expand=version"
+        url = self.config["host_url"] + "/content?title=" + name_confl + "&spaceKey=" + self.config["space"] + "&expand=version"
         r = self.session.get(url)
         r.raise_for_status()
         with nostdout():
@@ -416,7 +421,7 @@ class MkdocsWithConfluence(BasePlugin):
     def find_parent_name_of_page(self, name):
         logger.debug(f"INFO    -   * Mkdocs With Confluence: Find PARENT OF PAGE, PAGE NAME: {name}")
         idp = self.find_page_id(name)
-        url = self.config["host_url"] + "/" + idp + "?expand=ancestors"
+        url = self.config["host_url"] + "/content" + idp + "?expand=ancestors"
 
         r = self.session.get(url)
         r.raise_for_status()
@@ -433,4 +438,33 @@ class MkdocsWithConfluence(BasePlugin):
         start = time.time()
         while not condition and time.time() - start < timeout:
             time.sleep(interval)
-
+    
+    def set_homepage(self, page_name):
+        page_id = self.find_page_id(page_name)
+        url = self.config["host_url"] + "/space/" + self.config["space"]
+        headers = {
+            "Content-Type": "application/json",
+            "Accept": "application/json"
+        }
+        # data = {"homepage": {"id": page_id}} 
+        if not self.dryrun:
+            logger.info("getting the space information")
+            try:
+                r = self.session.get(url, headers=headers)
+                r.raise_for_status
+                with nostdout():
+                    response_json = r.json()
+            except Exception as exp:
+                logger.warning(r.json())
+                logger.error(exp)
+            response_json['homepage'] = { "id": page_id }
+            try:
+                r = self.session.put(url, json=response_json, headers=headers)
+                r.raise_for_status()
+            except Exception as exp:
+                logger.warning(r.json())
+                logger.error(exp)
+            if r.status_code == 200:
+                logger.info(f"A page with this id is now a homepage in the space: {page_id}")
+            else:
+                logger.error(f"Can't set homepage to: {page_id}")
