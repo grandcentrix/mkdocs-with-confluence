@@ -357,9 +357,10 @@ class MkdocsWithConfluence(BasePlugin):
                     "type": "page",
                     "title": page_name,
                     "space": {"key": space},
-                    "ancestors": [{"id": parent_page_id}],
                     "body": {"storage": {"value": page_content_in_storage_format, "representation": "storage"}},
                 }
+                if parent_page_id:
+                    data["ancestors"] = [{"id": parent_page_id}]
                 logger.debug(f"DATA: {data}")
                 if not self.dryrun:
                     try:
