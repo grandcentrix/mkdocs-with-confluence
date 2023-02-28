@@ -9,9 +9,9 @@ RUN mkdir /out
 RUN mv $(find /src/dist -maxdepth 1 -mindepth 1 -name '*tar.gz') /out/mkdocs_with_confluence.tar.gz
 
 FROM BUILDER as common_builder
+ARG MKDOCS_TO_CONFLUENCE_PASSWORD
 ENV MKDOCS_TO_CONFLUENCE=true
-ARG JIRA_PASSWORD
-ENV JIRA_PASSWORD=$JIRA_PASSWORD
+ENV MKDOCS_TO_CONFLUENCE_PASSWORD=$MKDOCS_TO_CONFLUENCE_PASSWORD
 RUN pip install mkdocs mkdocs-material
 WORKDIR /src
 COPY ./example /src

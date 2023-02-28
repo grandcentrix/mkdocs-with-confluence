@@ -7,7 +7,7 @@ venv:
 
 run_example:
 	
-	@docker build -t mkdocs-example -f ./example/Dockerfile --build-arg JIRA_PASSWORD=$(shell sops --decrypt ./example/secret.yaml | yq '.JIRA_PASSWORD' ) .
+	@docker build -t mkdocs-example -f ./example/Dockerfile --build-arg MKDOCS_TO_CONFLUENCE_PASSWORD=$(shell sops --decrypt ./example/secret.yaml | yq '.JIRA_PASSWORD' ) .
 	@docker run -p 8000:8000 mkdocs-example 
 
 lint: 
