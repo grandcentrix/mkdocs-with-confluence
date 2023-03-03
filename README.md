@@ -9,7 +9,7 @@ To enable plugin, you need to set the `MKDOCS_TO_CONFLUENCE` environment variabl
 export MKDOCS_TO_CONFLUENCE=1
 ```
 
-By default the dry-run mode is turned off. If you wan't to enable it, you can use the config file, ot the `MKDOCS_TO_CONFLUENCE_DRY_RUN` environment variable
+By default, the dry-run mode is turned off. If you want to enable it, you can use the config file, or the `MKDOCS_TO_CONFLUENCE_DRY_RUN` environment variable
 
 ```BASH
 export MKDOCS_TO_CONFLUENCE_DRY_RUN=1
@@ -18,7 +18,7 @@ export MKDOCS_TO_CONFLUENCE_DRY_RUN=1
 ## Setup
 Install the plugin using pip:
 
-`pip install https://github.com/allanger/mkdocs-with-confluence/releases/download/v0.3.1/mkdocs_with_confluence-0.3.1.tar.gz`
+`pip install https://github.com/grandcentrix/mkdocs-with-confluence/releases/download/v0.3.4/mkdocs_with_confluence-0.3.4.tar.gz`
 
 Activate the plugin in `mkdocs.yml`:
 
@@ -38,8 +38,8 @@ Use following config and adjust it according to your needs:
         host_url: https://<YOUR_CONFLUENCE_DOMAIN>/rest/api/content
         space: <YOUR_SPACE>
         parent_page_name: <YOUR_ROOT_PARENT_PAGE>
-        username: <YOUR_USERNAME_TO_CONFLUENCE> # JIRA_USERNAME env var can be used
-        password: <YOUR_PASSWORD_TO_CONFLUENCE> # JIRA_PASSWORD env var can be used
+        username: <YOUR_USERNAME_TO_CONFLUENCE> # MKDOCS_TO_CONFLUENCE_USER env var can be used
+        password: <YOUR_PASSWORD_TO_CONFLUENCE> # MKDOCS_TO_CONFLUENCE_PASSWORD env var can be used
         dryrun: true # MKDOCS_TO_CONFLUENCE_DRY_RUN env var can be used
         header_message: <A_MESSAGE_THAT_WILL_BE_ADDED_TO_EVERY_PAGE>
         upstream_url: <URL_OF_YOUR_MKDOCS_INSTANCE>
