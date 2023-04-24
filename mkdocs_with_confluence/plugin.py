@@ -56,7 +56,7 @@ class MkdocsWithConfluence(BasePlugin):
         ("upstream_url", config_options.Type(str, default=None)),
         ("header_warning", config_options.Type(str, default=HEADER_WARNING)),
         ("set_homepage", config_options.Type(bool, default=False)),
-        ("cleanup", config_options.Type(bool, default=False)),
+        ("cleanup", config_options.Type(bool, default=environ.get("MKDOCS_TO_CONFLUENCE_CLEANUP", False))),
     )
 
     def __init__(self):

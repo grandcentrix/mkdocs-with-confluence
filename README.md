@@ -46,7 +46,7 @@ Use following config and adjust it according to your needs:
         upstream_url: <URL_OF_YOUR_MKDOCS_INSTANCE>
         header_warning: "‼️ This page is created automatically, all you changes will be overwritten during the next MKDocs deployment. Do not edit a page here ‼️"
         set_homepage: true
-        cleanup: true
+        cleanup: true # MKDOCS_TO_CONFLUENCE_CLEANUP env var can be used
 
 ```
 
