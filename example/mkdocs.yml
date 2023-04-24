@@ -16,9 +16,9 @@ theme:
 plugins:
   - search
   - mkdocs-with-confluence:
-      host_url: https://mkdocs-to-conflunce.atlassian.net/wiki/rest/api/content
       space: MKDOC
-      parent_page_name: MKdocs
+      parent_page_name: Mkdocs
       username: allanguor@gmail.com
       dryrun: false
-
+      set_homepage: true
+      cleanup: true

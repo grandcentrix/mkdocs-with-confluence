@@ -18,12 +18,13 @@ export MKDOCS_TO_CONFLUENCE_DRY_RUN=1
 ## Setup
 Install the plugin using pip:
 
-`pip install https://github.com/grandcentrix/mkdocs-with-confluence/releases/download/v0.3.4/mkdocs_with_confluence-0.3.4.tar.gz`
+`pip install https://github.com/grandcentrix/mkdocs-with-confluence/releases/download/v0.4.0/mkdocs_with_confluence-0.4.0.tar.gz`
 
 Activate the plugin in `mkdocs.yml`:
 
 ```yaml
 plugins:
+  - search
   - mkdocs-with-confluence
 ```
 
@@ -35,7 +36,7 @@ Use following config and adjust it according to your needs:
 
 ```yaml
   - mkdocs-with-confluence:
-        host_url: https://<YOUR_CONFLUENCE_DOMAIN>/rest/api/content
+        host_url: https://<YOUR_CONFLUENCE_DOMAIN>/wiki
         space: <YOUR_SPACE>
         parent_page_name: <YOUR_ROOT_PARENT_PAGE>
         username: <YOUR_USERNAME_TO_CONFLUENCE> # MKDOCS_TO_CONFLUENCE_USER env var can be used
@@ -44,7 +45,24 @@ Use following config and adjust it according to your needs:
         header_message: <A_MESSAGE_THAT_WILL_BE_ADDED_TO_EVERY_PAGE>
         upstream_url: <URL_OF_YOUR_MKDOCS_INSTANCE>
         header_warning: "‼️ This page is created automatically, all you changes will be overwritten during the next MKDocs deployment. Do not edit a page here ‼️"
+        set_homepage: true
+        cleanup: true
 
+```
+
+### Config description
+```YAML
+host_url: An URL of yout confluence instance
+space: A confluence space that you'd like to sync mkdocs pages to
+paren_page_name: A name of a page that should  be a parent page for other pages synced from mkdocs. If not set, mkdocs will be synced directrly to the space
+username: Atlassian username
+password: Atlassian password (or an access token)
+dryrun: If set to `true`, changes won't be applied
+header_message: A message to be added to each confluence page
+upstream_url: An url of the mkdocs instance, to be added to each confluence page
+header_warning: By default it's a warning that pages should not be edited in confluence directrly. You can set whatever you'd like. It could be a `header_message` but I've decided to split them, so you can keep a warning while givin a custom message.
+set_homepage: If set to `true`, the page with a path = "/" will be set as the space homepage
+cleanup: If set to `true`, pages that are gone from mkdoc will be removed from confluence as well.  
 ```
 
 ### Requirements
