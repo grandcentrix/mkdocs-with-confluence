@@ -1,11 +1,12 @@
-# mkdocs-with-confluence 
+# mkdocs-with-confluence
 
 MkDocs plugin that converts markdown pages into confluence markup
 and export it to the Confluence page
 
-# How to use
+## How to use
+
 To enable plugin, you need to set the `MKDOCS_TO_CONFLUENCE` environment variable.
-```BASH
+
 export MKDOCS_TO_CONFLUENCE=1
 ```
 
@@ -16,6 +17,7 @@ export MKDOCS_TO_CONFLUENCE_DRY_RUN=1
 ```
 
 ## Setup
+
 Install the plugin using pip:
 
 `pip install https://github.com/grandcentrix/mkdocs-with-confluence/releases/download/v0.4.0/mkdocs_with_confluence-0.4.0.tar.gz`
@@ -50,8 +52,8 @@ Use following config and adjust it according to your needs:
 
 ```
 
-### Config description
-```YAML
+## Config description
+
 host_url: An URL of yout confluence instance
 space: A confluence space that you'd like to sync mkdocs pages to
 paren_page_name: A name of a page that should  be a parent page for other pages synced from mkdocs. If not set, mkdocs will be synced directrly to the space
@@ -62,10 +64,11 @@ header_message: A message to be added to each confluence page
 upstream_url: An url of the mkdocs instance, to be added to each confluence page
 header_warning: By default it's a warning that pages should not be edited in confluence directrly. You can set whatever you'd like. It could be a `header_message` but I've decided to split them, so you can keep a warning while givin a custom message.
 set_homepage: If set to `true`, the page with a path = "/" will be set as the space homepage
-cleanup: If set to `true`, pages that are gone from mkdoc will be removed from confluence as well.  
+cleanup: If set to `true`, pages that are gone from mkdoc will be removed from confluence as well.
 ```
 
-### Requirements
+## Requirements
+
 - md2cf
 - mimetypes
 - mistune
