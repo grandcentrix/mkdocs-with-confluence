@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "mkdocs-with-confluence"
-version = "0.4.1"
+version = "0.4.2"
 description = "MkDocs plugin for uploading markdown documentation to Confluence via Confluence REST API"
 authors = ["Nikolai Rodionov <allanger@zohomail.com>"]
 readme = "README.md"
