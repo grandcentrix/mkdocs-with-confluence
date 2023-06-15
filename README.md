@@ -7,12 +7,13 @@ and export it to the Confluence page
 
 To enable plugin, you need to set the `MKDOCS_TO_CONFLUENCE` environment variable.
 
+```bash
 export MKDOCS_TO_CONFLUENCE=1
 ```
 
 By default, the dry-run mode is turned off. If you want to enable it, you can use the config file, or the `MKDOCS_TO_CONFLUENCE_DRY_RUN` environment variable
 
-```BASH
+```bash
 export MKDOCS_TO_CONFLUENCE_DRY_RUN=1
 ```
 
@@ -54,6 +55,7 @@ Use following config and adjust it according to your needs:
 
 ## Config description
 
+```yaml
 host_url: An URL of yout confluence instance
 space: A confluence space that you'd like to sync mkdocs pages to
 paren_page_name: A name of a page that should  be a parent page for other pages synced from mkdocs. If not set, mkdocs will be synced directrly to the space
