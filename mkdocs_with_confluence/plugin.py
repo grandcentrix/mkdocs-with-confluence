@@ -81,37 +81,37 @@ class MkdocsWithConfluence(BasePlugin):
         if os.environ.get(ENABLE_ENV_VAR):
             logger.info("MKDocs with Confluence is enabled")
             self.enabled = True
+            # ------------------------------------------------------
+            # -- Set the dry-run mode
+            # ------------------------------------------------------
+            if self.config["dryrun"]  or os.environ.get(DRY_RUN_ENV_VAR):
+                logger.info("dry-run mode is turned on, your changes won't be synced with Confluence")
+                self.dryrun = True
+            else:
+                logger.info("dry-run mode is turned off, your changes will be synced with Confluence")
+                self.dryrun = False
+            # ------------------------------------------------------
+            # -- Set git url to add to a confluence page
+            # ------------------------------------------------------
+            if config["repo_url"]:
+                self.repo_url = config["repo_url"]
+                logger.info(f"git url is set to {self.repo_url}")
+            # ------------------------------------------------------
+            # -- Set a custom header to add to a confluence page
+            # ------------------------------------------------------
+            if self.config["header_message"]:
+                self.header_message = self.config["header_message"]
+                logger.info(f"header message is set to {self.header_message}")
+            # ------------------------------------------------------
+            # -- Set an upstream url to add to a confluence page
+            # ------------------------------------------------------
+            if self.config["upstream_url"]:
+                self.upstream_url = self.config["upstream_url"]
+                logger.info(f"upstream url is set to {self.upstream_url}")
         else:
             logger.info(
                 f"MKDocs with Confluence is disabled, set the {ENABLE_ENV_VAR} to enable the plugin"
             )
-        # ------------------------------------------------------
-        # -- Set the dry-run mode
-        # ------------------------------------------------------
-        if self.config["dryrun"]  or os.environ.get(DRY_RUN_ENV_VAR):
-            logger.info("dry-run mode is turned on, your changes won't be synced with Confluence")
-            self.dryrun = True
-        else:
-            logger.info("dry-run mode is turned off, your changes will be synced with Confluence")
-            self.dryrun = False
-        # ------------------------------------------------------
-        # -- Set git url to add to a confluence page
-        # ------------------------------------------------------
-        if config["repo_url"]:
-            self.repo_url = config["repo_url"]
-            logger.info(f"git url is set to {self.repo_url}")
-        # ------------------------------------------------------
-        # -- Set a custom header to add to a confluence page
-        # ------------------------------------------------------
-        if self.config["header_message"]:
-            self.header_message = self.config["header_message"]
-            logger.info(f"header message is set to {self.header_message}")
-        # ------------------------------------------------------
-        # -- Set an upstream url to add to a confluence page
-        # ------------------------------------------------------
-        if self.config["upstream_url"]:
-            self.upstream_url = self.config["upstream_url"]
-            logger.info(f"upstream url is set to {self.upstream_url}")
 
 
     def on_files(self, files, config):
