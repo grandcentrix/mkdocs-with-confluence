@@ -21,7 +21,7 @@ export MKDOCS_TO_CONFLUENCE_DRY_RUN=1
 
 Install the plugin using pip:
 
-`pip install https://github.com/grandcentrix/mkdocs-with-confluence/releases/download/v0.4.1/mkdocs_with_confluence-0.4.1.tar.gz`
+`pip install https://github.com/grandcentrix/mkdocs-with-confluence/releases/download/v0.4.2/mkdocs_with_confluence-0.4.2.tar.gz`
 
 Activate the plugin in `mkdocs.yml`:
 
